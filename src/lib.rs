@@ -3,7 +3,7 @@ use std::ops::{DivAssign, Mul};
 
 use na::DMatrix;
 
-pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> f64 {
+pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Vec<f64> {
     //Input:
     let dim = dim_;
     let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, m_mat_vec);
@@ -94,7 +94,11 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> f64 {
     // let c_damping = inv_eigen_vect_trans.mul(c_natural).mul(inv_eigen_vect);
     //
     // println!("C damping : {}", c_damping);
-    omega[0]
+    let mut omega_vec = vec![];
+    for om in omega.iter() {
+        omega_vec.push(om.to_owned())
+    }
+    omega_vec
 }
 
 fn add_sub_matrix(
