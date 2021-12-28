@@ -1,16 +1,16 @@
 extern crate nalgebra as na;
-use std::iter::FromIterator;
 use std::ops::{DivAssign, Mul};
 
-use na::DMatrix;
+use na::{DMatrix, Matrix};
 
 #[derive(Debug)]
 pub struct Mode {
-    pub frequency: f64,
-    pub mode: Vec<f64>,
+    pub frequency: Vec<f64>,
+    pub eigenvectors_normalized: DMatrix<f64>,
+    pub eigenvectors: DMatrix<f64>,
 }
 
-pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Vec<Mode> {
+pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
     //Input:
     let dim = dim_;
     let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, m_mat_vec);
@@ -47,8 +47,8 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Vec<Mode>
     }
     println!("---------------------------------------------------------");
 
-    let omega = eigen.clone().map(|e| e.sqrt());
-    println!("Omega : {}", omega);
+    let omega = eigen.clone().map(|e| e.sqrt()).as_slice().to_vec();
+    println!("Omega : {:?}", omega);
     println!("EigenValues : {}", eigen);
     println!("EigenVectors : {}", eigen_vect);
 
@@ -101,24 +101,28 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Vec<Mode>
     // let c_damping = inv_eigen_vect_trans.mul(c_natural).mul(inv_eigen_vect);
     //
     // println!("C damping : {}", c_damping);
-    let mut omega_vec: Vec<f64> = Vec::with_capacity(dim);
-    for om in omega.iter() {
-        omega_vec.push(om.to_owned())
-    }
-    let mut eigen_vect_norm_vec: Vec<Vec<f64>> = Vec::new();
-    for col in eigen_vect_norm.column_iter() {
-        eigen_vect_norm_vec.push(col.as_slice().to_owned())
-    }
-    let mut modes: Vec<Mode> = Vec::with_capacity(dim);
+    // let mut omega_vec: Vec<f64> = Vec::with_capacity(dim);
+    // for om in omega.iter() {
+    //     omega_vec.push(om.to_owned())
+    // }
+    // let mut eigen_vect_norm_vec: Vec<Vec<f64>> = Vec::new();
+    // for col in eigen_vect_norm.column_iter() {
+    //     eigen_vect_norm_vec.push(col.as_slice().to_owned())
+    // }
+    // let mut modes: Vec<Mode> = Vec::with_capacity(dim);
     // TODO: what effect has a change in column position of eigenvector matrix? to x variables?
-    for (omega, shape) in omega_vec.iter().zip(eigen_vect_norm_vec) {
-        modes.push(Mode {
-            frequency: *omega,
-            mode: shape,
-        });
+    // for (omega, shape) in omega_vec.iter().zip(eigen_vect_norm_vec) {
+    //     modes.push(Mode {
+    //         frequency: *omega,
+    //         mode: shape,
+    //     });
+    // }
+    // modes.sort_by(|a, b| a.frequency.partial_cmp(&b.frequency).unwrap());
+    Mode {
+        frequency: omega,
+        eigenvectors_normalized: eigen_vect_norm,
+        eigenvectors: eigen_vect,
     }
-    modes.sort_by(|a, b| a.frequency.partial_cmp(&b.frequency).unwrap());
-    modes
 }
 
 fn add_sub_matrix(
