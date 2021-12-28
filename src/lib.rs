@@ -6,8 +6,8 @@ use na::DMatrix;
 
 #[derive(Debug)]
 pub struct Mode {
-    frequency: f64,
-    mode: Vec<f64>,
+    pub frequency: f64,
+    pub mode: Vec<f64>,
 }
 
 pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Vec<Mode> {
