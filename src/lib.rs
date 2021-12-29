@@ -118,11 +118,12 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
     //     });
     // }
     // modes.sort_by(|a, b| a.frequency.partial_cmp(&b.frequency).unwrap());
-    Mode {
+    let mode = Mode {
         frequency: omega,
         eigenvectors_normalized: eigen_vect_norm,
         eigenvectors: eigen_vect,
-    }
+    };
+    return mode;
 }
 
 fn add_sub_matrix(
