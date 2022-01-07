@@ -1,7 +1,7 @@
 extern crate nalgebra as na;
 use std::ops::{DivAssign, Mul};
 
-use na::{DMatrix, Matrix};
+use na::DMatrix;
 
 #[derive(Debug)]
 pub struct Mode {
@@ -10,7 +10,7 @@ pub struct Mode {
     pub eigenvectors: DMatrix<f64>,
 }
 
-pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
+pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mode, String> {
     //Input:
     let dim = dim_;
     let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, m_mat_vec);
@@ -20,13 +20,18 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
     // ----------------------------------------------
 
     println!("M_matrix : {}", m_matrix);
+    // let inv_m_matrix = m_matrix.clone().try_inverse();
     let inv_m_matrix = match m_matrix.clone().try_inverse() {
         Some(i) => i,
-        None => panic!("Matrix could not be inversed"),
+        None => return Err(String::from("Matrix could not be inversed")),
     };
     let a_matrix = inv_m_matrix * k_matrix;
 
-    let eigen = a_matrix.eigenvalues().expect("Error getting eigenvalues");
+    // let eigen = a_matrix.eigenvalues().expect("Error getting eigenvalues");
+    let eigen = match a_matrix.eigenvalues() {
+        Some(i) => i,
+        None => return Err(String::from("Error getting eigenvalues")),
+    };
     println!("A_matrix :{}", a_matrix);
 
     let mut eigen_vect: DMatrix<f64> = DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]);
@@ -41,9 +46,17 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
         b_vec[i] = 1.0;
         let b = DMatrix::from_vec(dim, 1, b_vec);
         let decomp = a_mat_for_eigen_vec.lu();
-        let mut x = decomp.solve(&b).expect("Linear resolution failed.");
+        // let mut x = decomp.solve(&b).expect("Linear resolution failed.");
+        let mut x = match decomp.solve(&b) {
+            Some(i) => i,
+            None => return Err(String::from("Linear resolution failed")),
+        };
         x.div_assign(x[i]);
-        add_sub_matrix(&mut eigen_vect, (0, i), &x).expect("Error adding sub_matrix");
+        // add_sub_matrix(&mut eigen_vect, (0, i), &x).expect("Error adding sub_matrix");
+        match add_sub_matrix(&mut eigen_vect, (0, i), &x) {
+            Ok(_) => (),
+            Err(e) => return Err(e),
+        };
     }
     println!("---------------------------------------------------------");
 
@@ -123,7 +136,7 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Mode {
         eigenvectors_normalized: eigen_vect_norm,
         eigenvectors: eigen_vect,
     };
-    return mode;
+    return Ok(mode);
 }
 
 fn add_sub_matrix(
