@@ -6,26 +6,37 @@ use na::DMatrix;
 #[derive(Debug)]
 pub struct Mode {
     pub frequency: Vec<f64>,
+    pub eigenvalues: DMatrix<f64>,
     pub eigenvectors_normalized: DMatrix<f64>,
     pub eigenvectors: DMatrix<f64>,
 }
 
-pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mode, String> {
-    //Input:
-    let dim = dim_;
-    let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, m_mat_vec);
+pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: DMatrix<f64>) -> Result<Mode, String> {
+    //Checks
+    if !mass_matrix.is_square() {
+        return Err(String::from("Mass matrix is not square"));
+    }
+    if !stiffness_matrix.is_square() {
+        return Err(String::from("Stiffness matrix is not square"));
+    }
+    let shape_mass = mass_matrix.shape();
+    let shape_stiff = stiffness_matrix.shape();
+    if shape_mass != shape_stiff {
+        return Err(String::from(format!(
+            "Matrix and stiffness matrix have different dimensions. Mass={}, Stiffness={}",
+            shape_mass.0, shape_stiff.0
+        )));
+    }
 
-    let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, k_mat_vec);
+    let dim = shape_mass.0;
 
-    // ----------------------------------------------
-
-    println!("M_matrix : {}", m_matrix);
+    println!("M_matrix : {}", mass_matrix);
     // let inv_m_matrix = m_matrix.clone().try_inverse();
-    let inv_m_matrix = match m_matrix.clone().try_inverse() {
+    let inv_m_matrix = match mass_matrix.clone().try_inverse() {
         Some(i) => i,
         None => return Err(String::from("Matrix could not be inversed")),
     };
-    let a_matrix = inv_m_matrix * k_matrix;
+    let a_matrix = inv_m_matrix * stiffness_matrix;
 
     // let eigen = a_matrix.eigenvalues().expect("Error getting eigenvalues");
     let eigen = match a_matrix.eigenvalues() {
@@ -61,9 +72,10 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mo
     println!("---------------------------------------------------------");
 
     let omega = eigen.clone().map(|e| e.sqrt()).as_slice().to_vec();
-    println!("Omega : {:?}", omega);
-    println!("EigenValues : {}", eigen);
-    println!("EigenVectors : {}", eigen_vect);
+    // let om2 = eigen.clone().map(|e| e.sqrt());
+    // println!("Omega : {:?}", omega);
+    // println!("EigenValues : {}", eigen);
+    // println!("EigenVectors : {}", eigen_vect);
 
     println!("---------------------------------------------------------");
 
@@ -72,7 +84,7 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mo
 
     let modal_mass = eigen_vect_trans
         .clone()
-        .mul(m_matrix.clone())
+        .mul(mass_matrix.clone())
         .mul(eigen_vect.clone());
 
     // println!("m_se: {}", m_se);
@@ -86,11 +98,11 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mo
         col.div_assign(modal_mass[(i, i)].powf(0.5));
     }
 
-    println!("eigenvectors norm : {}", eigen_vect_norm);
+    // println!("eigenvectors norm : {}", eigen_vect_norm);
     let modal_mass_norm = eigen_vect_norm
         .transpose()
         .clone()
-        .mul(m_matrix.clone())
+        .mul(mass_matrix.clone())
         .mul(eigen_vect_norm.clone());
     println!("modal mass norm : {}", modal_mass_norm);
     //
@@ -133,6 +145,7 @@ pub fn eigen(dim_: usize, m_mat_vec: Vec<f64>, k_mat_vec: Vec<f64>) -> Result<Mo
     // modes.sort_by(|a, b| a.frequency.partial_cmp(&b.frequency).unwrap());
     let mode = Mode {
         frequency: omega,
+        eigenvalues: DMatrix::from_diagonal(&eigen),
         eigenvectors_normalized: eigen_vect_norm,
         eigenvectors: eigen_vect,
     };
@@ -161,16 +174,41 @@ fn add_sub_matrix(
 
 #[cfg(test)]
 mod tests {
+
+    use na::DVector;
+
     use super::*;
     #[test]
     fn it_works() {
         let mass_mat_vec: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0];
         let stiff_mat_vec: Vec<f64> = vec![2.0, -1.0, -1.0, 2.0];
-        let modes = eigen(2, mass_mat_vec, stiff_mat_vec);
 
-        //Get min
-        println!("{:?}", modes);
-        // println!("{:?}", modes);
-        assert_eq!(2 + 2, 4);
+        let dim: usize = 2;
+        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
+        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
+
+        let modes = eigen(&m_matrix, k_matrix);
+        assert!(modes.is_ok());
+        let modes = modes.unwrap();
+        //Print
+        println!("Frequencies : {:?}", modes.frequency);
+        println!("Eigenvalues : {}", modes.eigenvalues);
+        println!("Eigenvectors : {}", modes.eigenvectors);
+        println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
+
+        let (w1, w2) = (1.53819, 0.79623);
+        let sol_freq_vec = DVector::from_vec(vec![w1, w2]);
+        let sol_eigenval = DMatrix::from_vec(dim, dim, vec![w1 * w1, 0.0, 0.0, w2 * w2]);
+        let sol_eigenvec_norm =
+            DMatrix::from_vec(dim, dim, vec![0.88807, -0.32506, 0.4597, 0.62796]);
+        // println!("{:?}", modes.eigenvectors.clone().mul(mass_mat_vec));
+        // assert_eq!(2 + 2, 4);
+        let freq_vec_na = DVector::from_vec(modes.frequency);
+        let eps = 0.0001;
+        assert!(freq_vec_na.relative_eq(&sol_freq_vec, eps, eps));
+        assert!(modes.eigenvalues.relative_eq(&sol_eigenval, eps, eps));
+        assert!(modes
+            .eigenvectors_normalized
+            .relative_eq(&sol_eigenvec_norm, eps, eps));
     }
 }
