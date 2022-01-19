@@ -80,15 +80,12 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
 
     let dim = shape_mass.0;
 
-    // println!("M_matrix : {}", mass_matrix);
-    // let inv_m_matrix = m_matrix.clone().try_inverse();
     let inv_m_matrix = match mass_matrix.clone().try_inverse() {
         Some(i) => i,
         None => return Err(String::from("Matrix could not be inversed")),
     };
     let a_matrix = inv_m_matrix * stiffness_matrix;
 
-    // let eigen = a_matrix.eigenvalues().expect("Error getting eigenvalues");
     let eigen = match a_matrix.eigenvalues() {
         Some(i) => i,
         None => return Err(String::from("Error getting eigenvalues")),
@@ -109,7 +106,6 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
         // b_vec[0] = 1.0;
         let b = DMatrix::from_vec(dim, 1, b_vec);
         let decomp = a_mat_for_eigen_vec.lu();
-        // let mut x = decomp.solve(&b).expect("Linear resolution failed.");
         let mut x = match decomp.solve(&b) {
             Some(i) => i,
             None => return Err(String::from("Linear resolution failed")),
@@ -117,48 +113,22 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
         x.div_assign(x[i]);
         // This way corresponds to setting first value to 1.0 in b_vec
         // x.div_assign(x[0]);
-        // add_sub_matrix(&mut eigen_vect, (0, i), &x).expect("Error adding sub_matrix");
         match add_sub_matrix(&mut eigen_vect, (0, i), &x) {
             Ok(_) => (),
             Err(e) => return Err(e),
         };
     }
-    // println!("---------------------------------------------------------");
 
     let omega = eigen.clone().map(|e| e.sqrt()).as_slice().to_vec();
-    // let om2 = eigen.clone().map(|e| e.sqrt());
-    // println!("Omega : {:?}", omega);
-    // println!("EigenValues : {}", eigen);
-    // println!("EigenVectors : {}", eigen_vect);
-
-    // println!("---------------------------------------------------------");
 
     // Get modal mass and modal stiffness matrix
-    let eigen_vect_trans = eigen_vect.transpose();
-
-    let modal_mass = eigen_vect_trans
-        .clone()
-        .mul(mass_matrix.clone())
-        .mul(eigen_vect.clone());
-
-    // println!("m_se: {}", m_se);
-    // println!("{}", eigen_vect);
-    // println!("{}", eigen_vect_trans);
-    // println!("modal mass: {}", modal_mass);
+    let modal_mass = eigen_vect.transpose().mul(mass_matrix).mul(&eigen_vect);
 
     let mut eigen_vect_norm = eigen_vect.clone();
-    // println!("{}", eigen_vect_norm[(0, 0)]);
     for (i, mut col) in eigen_vect_norm.column_iter_mut().enumerate() {
         col.div_assign(modal_mass[(i, i)].powf(0.5));
     }
 
-    // println!("eigenvectors norm : {}", eigen_vect_norm);
-    // let modal_mass_norm = eigen_vect_norm
-    //     .transpose()
-    //     .clone()
-    //     .mul(mass_matrix.clone())
-    //     .mul(eigen_vect_norm.clone());
-    // println!("modal mass norm : {}", modal_mass_norm);
     //
     // let diag_c = eigen.clone().div_assign(2.0);
     // println!("Diag_c : {}", diag_c);
