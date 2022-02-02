@@ -94,6 +94,7 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
 
     let mut eigen_vect: DMatrix<f64> = DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]);
 
+    // println!("HEllloo {}", eigen);
     for (i, lambda) in eigen.iter().enumerate() {
         let eigen_identity_matrix: DMatrix<f64> = DMatrix::identity(dim, dim).mul(*lambda);
         let a_mat_for_eigen_vec = a_matrix.clone() - &eigen_identity_matrix;
@@ -104,6 +105,7 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
         b_vec[i] = 1.0;
         // Other way can be to set always the first value to 1.0
         // b_vec[0] = 1.0;
+        // println!("HEllloo {}", lambda);
         let b = DMatrix::from_vec(dim, 1, b_vec);
         let decomp = a_mat_for_eigen_vec.lu();
         let mut x = match decomp.solve(&b) {
@@ -251,6 +253,39 @@ mod tests {
         println!("Xt * M * X : {}", generalized_mass);
         // check_orthogonality_property(m_matrix, k_matrix, modes.eigenvectors_normalized);
     }
+    #[test]
+    fn test_case() {
+        let mass_mat_vec: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0];
+        let stiff_mat_vec: Vec<f64> = vec![4000.0, -3000.0, -3000.0, 5000.0];
+
+        let dim: usize = 2;
+        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
+        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
+
+        let modes = eigen(&m_matrix, &k_matrix);
+        assert!(modes.is_ok());
+        let modes = modes.unwrap();
+        //Print
+        println!("Frequencies : {:?}", modes.frequency);
+        println!("Eigenvalues : {}", modes.eigenvalues);
+        println!("Eigenvectors : {}", modes.eigenvectors);
+        println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
+    }
+    #[test]
+    fn rigid_body() {
+        let mass_mat_vec: Vec<f64> = vec![150.0, 0.0, 0.0, 100.0];
+        let stiff_mat_vec: Vec<f64> = vec![15000.0, -15000.0, -15000.0, 15000.0];
+
+        let dim: usize = 2;
+        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
+        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
+
+        let modes = eigen(&m_matrix, &k_matrix);
+        assert!(modes.is_err());
+        // TODO: check eigenvectors and eigenvalues of elastic modes
+        println!("{}", modes.expect_err(""))
+    }
+
     // #[test]
     // fn vec_mul_mat() {
     //     let vec: DVector<f64> = DVector::from_vec(vec![1.0, 1.0]);
