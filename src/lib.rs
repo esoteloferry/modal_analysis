@@ -30,30 +30,19 @@ pub fn check_orthogonality_property(
     let dim = eigenvectors.ncols();
     let vec_dim_num: Vec<usize> = (0..dim).collect();
 
-    println!("Inputs: {}{}{}", mass, stiff, eigenvectors);
     for (i, col) in eigenvectors.column_iter().enumerate() {
-        // col.mul_to(&mass, out)
-        // let other_cols: Vec<usize> = vec_dim_num.iter().clone().filter(|&x| i.eq(x)).collect();
         let mut other_cols = vec_dim_num.clone();
         other_cols.retain(|&x| !x.eq(&i));
         for other_col_idx in other_cols {
-            println!("{:?} {:?}", i, other_col_idx);
-            println!(
-                "{}{}{}",
-                col.transpose(),
-                mass,
-                eigenvectors.column(other_col_idx)
-            );
-            println!(
-                "Check {}",
-                col.transpose()
-                    .mul(&mass)
-                    .mul(eigenvectors.column(other_col_idx))
-            )
+            let mul_vecb_mass_veca = col
+                .transpose()
+                .mul(&mass)
+                .mul(eigenvectors.column(other_col_idx));
+            // println!("Check {}", mul_vecb_mass_veca);
+            if mul_vecb_mass_veca.sum() != 0.0 {
+                return false;
+            }
         }
-        // let other_cols = vec_dim_num.clone().retain(|&x| x != i);
-        // println!("HEHETEETETEE{} {}", col.transpose().mul(&mass), i);
-        // println!("ASEHNNTE{}, {:?}, {:?}", i, vec_dim_num, other_cols);
     }
     true
 }
@@ -251,7 +240,9 @@ mod tests {
             .mul(&m_matrix)
             .mul(&modes.eigenvectors);
         println!("Xt * M * X : {}", generalized_mass);
-        // check_orthogonality_property(m_matrix, k_matrix, modes.eigenvectors_normalized);
+        let check_orthog_prop =
+            check_orthogonality_property(m_matrix, k_matrix, modes.eigenvectors_normalized);
+        assert!(check_orthog_prop);
     }
     #[test]
     fn test_case() {
