@@ -190,23 +190,32 @@ pub fn get_free_vibration(
     //  [x] = [[constant]] * [[cos(omega_i * t)]]
     let init_mod_space_mat = DMatrix::from_diagonal(&q_0);
     let eigen_vec_mul_q_0 = eigenvec_norm.mul(init_mod_space_mat);
-    Ok(cos_solution(eigen_vec_mul_q_0, omegas.clone()))
-    // Ok(|i| i * 2.0)
+    Ok(solve_with_form_solution(
+        eigen_vec_mul_q_0,
+        omegas.clone(),
+        cos_sol_form,
+    ))
 }
 
 // Solution form : x= A cos (omega * t)
-fn cos_solution(const_mat: DMatrix<f64>, omegas: DVector<f64>) -> impl Fn(f64) -> DVector<f64> {
+fn cos_sol_form(time: f64, omega: f64) -> f64 {
+    (omega * time).cos()
+}
+
+fn solve_with_form_solution<F: Fn(f64, f64) -> f64>(
+    const_mat: DMatrix<f64>,
+    omegas: DVector<f64>,
+    form_solution: F,
+) -> impl Fn(f64) -> DVector<f64> {
     move |time| {
         let mut sum: DVector<f64> = DVector::from_vec(vec![0.0; const_mat.nrows()]);
         for (i, col) in const_mat.column_iter().enumerate() {
-            let cos_at_time = (omegas[i] * time).cos();
+            let cos_at_time = form_solution(time, omegas[i]);
             sum.add_assign(col.mul(cos_at_time));
         }
         sum
     }
 }
-
-// fn joined_form()
 
 fn add_sub_matrix(
     mat: &mut DMatrix<f64>,
