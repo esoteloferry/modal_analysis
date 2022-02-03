@@ -1,12 +1,12 @@
 extern crate nalgebra as na;
-use std::ops::{DivAssign, Mul};
+use std::ops::{AddAssign, DivAssign, Mul};
 
-use na::DMatrix;
+use na::{ComplexField, DMatrix, DVector};
 
 #[derive(Debug)]
 pub struct Mode {
-    pub frequency: Vec<f64>,
-    pub eigenvalues: DMatrix<f64>, // Also known as Spectral Matrix
+    pub frequency: Vec<f64>,                   //rad/s
+    pub eigenvalues: DMatrix<f64>,             // Also known as Spectral Matrix
     pub eigenvectors_normalized: DMatrix<f64>, //Also known as Modal Matrix
     pub eigenvectors: DMatrix<f64>,
 }
@@ -167,6 +167,47 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
     return Ok(mode);
 }
 
+//Functions to get vibration motion
+//
+// x = x_free  +  x_forced
+//
+//
+pub fn get_free_vibration(
+    eigenvec_norm: &DMatrix<f64>,
+    omegas: &DVector<f64>,
+    mass_mat: &DMatrix<f64>,
+    init_cond: &DVector<f64>,
+) -> Result<impl Fn(f64) -> DVector<f64>, String> {
+    // q init = EigenVec_trans * Mass_matrix * InitCond_Pos
+    let q_0 = eigenvec_norm.transpose().mul(mass_mat).mul(init_cond);
+    // So converting from modal space to physics space
+    //  [x] = [[eigen_vec_norm]] * [q]
+    //  Where [q] = [[q_0]] * [[cos(omega_i * t)]], each of matrix in right are diagonal
+    //  By association:
+    //  [x] = ( [[eigen_vec_norm]] * [[q_0]] ) * [[cos(omega_i * t)]]
+    //          \--------------------------/
+    //               this will not change
+    //  [x] = [[constant]] * [[cos(omega_i * t)]]
+    let init_mod_space_mat = DMatrix::from_diagonal(&q_0);
+    let eigen_vec_mul_q_0 = eigenvec_norm.mul(init_mod_space_mat);
+    Ok(cos_solution(eigen_vec_mul_q_0, omegas.clone()))
+    // Ok(|i| i * 2.0)
+}
+
+// Solution form : x= A cos (omega * t)
+fn cos_solution(const_mat: DMatrix<f64>, omegas: DVector<f64>) -> impl Fn(f64) -> DVector<f64> {
+    move |time| {
+        let mut sum: DVector<f64> = DVector::from_vec(vec![0.0; const_mat.nrows()]);
+        for (i, col) in const_mat.column_iter().enumerate() {
+            let cos_at_time = (omegas[i] * time).cos();
+            sum.add_assign(col.mul(cos_at_time));
+        }
+        sum
+    }
+}
+
+// fn joined_form()
+
 fn add_sub_matrix(
     mat: &mut DMatrix<f64>,
     (row, col): (usize, usize),
@@ -190,18 +231,56 @@ fn add_sub_matrix(
 #[cfg(test)]
 mod tests {
 
+    use std::ops::AddAssign;
+
     use na::{DVector, Matrix2x4, Vector2};
 
+    //This allows me to test private functions
+    struct Modal {
+        Mass_Matrix: DMatrix<f64>,
+        Stiff_Matrix: DMatrix<f64>,
+        Frequencies: DVector<f64>,
+        EigenValues: DMatrix<f64>,
+        EigenVectors_Normalized: DMatrix<f64>,
+    }
+
+    struct Setup {
+        _2d: Modal,
+    }
+
+    impl Setup {
+        fn new() -> Self {
+            let dim = 2;
+            let mass_mat_vec: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0]; //kg
+            let stiff_mat_vec: Vec<f64> = vec![2.0, -1.0, -1.0, 2.0]; //N/m
+
+            let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
+            let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
+            //Solution
+            let (w1_2D, w2_2D) = (1.53819, 0.79623); //rad/s
+            let sol_freq_vec_2D = DVector::from_vec(vec![w1_2D, w2_2D]);
+            let sol_eigenval_2D =
+                DMatrix::from_vec(dim, dim, vec![w1_2D * w1_2D, 0.0, 0.0, w2_2D * w2_2D]);
+            let sol_eigenvec_norm_2D =
+                DMatrix::from_vec(dim, dim, vec![0.88807, -0.32506, 0.4597, 0.62796]);
+            Self {
+                _2d: Modal {
+                    Mass_Matrix: m_matrix,
+                    Stiff_Matrix: k_matrix,
+                    Frequencies: sol_freq_vec_2D,
+                    EigenValues: sol_eigenval_2D,
+                    EigenVectors_Normalized: sol_eigenvec_norm_2D,
+                },
+            }
+        }
+    }
     use super::*;
+
     #[test]
-    fn it_works() {
-        let mass_mat_vec: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0];
-        let stiff_mat_vec: Vec<f64> = vec![2.0, -1.0, -1.0, 2.0];
-
-        let dim: usize = 2;
-        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
-        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
-
+    fn eigen_analysis() {
+        let setup = Setup::new();
+        let m_matrix = setup._2d.Mass_Matrix;
+        let k_matrix = setup._2d.Stiff_Matrix;
         let modes = eigen(&m_matrix, &k_matrix);
         assert!(modes.is_ok());
         let modes = modes.unwrap();
@@ -211,20 +290,19 @@ mod tests {
         println!("Eigenvectors : {}", modes.eigenvectors);
         println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
 
-        let (w1, w2) = (1.53819, 0.79623);
-        let sol_freq_vec = DVector::from_vec(vec![w1, w2]);
-        let sol_eigenval = DMatrix::from_vec(dim, dim, vec![w1 * w1, 0.0, 0.0, w2 * w2]);
-        let sol_eigenvec_norm =
-            DMatrix::from_vec(dim, dim, vec![0.88807, -0.32506, 0.4597, 0.62796]);
         // println!("{:?}", modes.eigenvectors.clone().mul(mass_mat_vec));
         // assert_eq!(2 + 2, 4);
         let freq_vec_na = DVector::from_vec(modes.frequency);
         let eps = 0.0001;
-        assert!(freq_vec_na.relative_eq(&sol_freq_vec, eps, eps));
-        assert!(modes.eigenvalues.relative_eq(&sol_eigenval, eps, eps));
+        assert!(freq_vec_na.relative_eq(&setup._2d.Frequencies, eps, eps));
         assert!(modes
-            .eigenvectors_normalized
-            .relative_eq(&sol_eigenvec_norm, eps, eps));
+            .eigenvalues
+            .relative_eq(&setup._2d.EigenValues, eps, eps));
+        assert!(modes.eigenvectors_normalized.relative_eq(
+            &setup._2d.EigenVectors_Normalized,
+            eps,
+            eps
+        ));
 
         println!(
             "Xt * M * X : {}",
@@ -245,7 +323,7 @@ mod tests {
         assert!(check_orthog_prop);
     }
     #[test]
-    fn test_case() {
+    fn test_case_runs_ok() {
         let mass_mat_vec: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0];
         let stiff_mat_vec: Vec<f64> = vec![4000.0, -3000.0, -3000.0, 5000.0];
 
@@ -255,12 +333,12 @@ mod tests {
 
         let modes = eigen(&m_matrix, &k_matrix);
         assert!(modes.is_ok());
-        let modes = modes.unwrap();
+        // let modes = modes.unwrap();
         //Print
-        println!("Frequencies : {:?}", modes.frequency);
-        println!("Eigenvalues : {}", modes.eigenvalues);
-        println!("Eigenvectors : {}", modes.eigenvectors);
-        println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
+        // println!("Frequencies : {:?}", modes.frequency);
+        // println!("Eigenvalues : {}", modes.eigenvalues);
+        // println!("Eigenvectors : {}", modes.eigenvectors);
+        // println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
     }
     #[test]
     fn rigid_body() {
@@ -277,6 +355,22 @@ mod tests {
         println!("{}", modes.expect_err(""))
     }
 
+    #[test]
+    fn test_get_free_vibration() {
+        let setup = Setup::new();
+        let ini_cond = DVector::from_vec(vec![1.0, 0.0]);
+        let fnvib = get_free_vibration(
+            &setup._2d.EigenVectors_Normalized,
+            &setup._2d.Frequencies,
+            &setup._2d.Mass_Matrix,
+            &ini_cond,
+        );
+        assert!(fnvib.is_ok());
+        let fnvib = fnvib.unwrap();
+        println!("{}", fnvib(0.0));
+        println!("{}", fnvib(2.0));
+        println!("{}", fnvib(4.0));
+    }
     // #[test]
     // fn vec_mul_mat() {
     //     let vec: DVector<f64> = DVector::from_vec(vec![1.0, 1.0]);
@@ -294,5 +388,13 @@ mod tests {
     //     // println!("{}", vec.transpose());
     //     // println!("{}", matrix);
     //     // println!("{}", vec.transpose().mul(matrix));
+    // }
+    //
+    // #[test]
+    // fn vec_add() {
+    //     let mut vec_empty: Vector2<f64> = Vector2::from_vec(vec![0.0; 2]);
+    //     let vec_to_add: Vector2<f64> = Vector2::from_vec(vec![1.0, 1.0]);
+    //     vec_empty.add_assign(vec_to_add);
+    //     println!("{}", vec_empty);
     // }
 }
