@@ -37,16 +37,20 @@ pub struct StructureSim {
 }
 
 impl StructureSim {
-    pub fn new(structure: Structure, init_position: &DVector<f64>) -> StructureSim {
-        let init_modal = modal::get_free_vibration(
-            &structure.modes.eigenvectors_normalized,
-            &structure.mass,
-            init_position,
-        );
+    pub fn new(structure: Structure) -> StructureSim {
+        let dim = structure.mass.nrows();
         StructureSim {
             structure: structure,
-            init_cond_modal: init_modal,
+            init_cond_modal: DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]),
         }
+    }
+    pub fn set_initial_conditions(&mut self, init_position: &DVector<f64>) {
+        let init_modal = modal::get_free_vibration(
+            &self.structure.modes.eigenvectors_normalized,
+            &self.structure.mass,
+            init_position,
+        );
+        self.init_cond_modal = init_modal
     }
     fn step(&self, time: f64) -> DVector<f64> {
         modal::solve_with_form_solution(
@@ -144,7 +148,8 @@ mod tests {
         assert!(struct_.is_ok());
         let struct_ = struct_.unwrap();
         let init_position = DVector::from_vec(vec![1.0, 0.0]);
-        let struct_sim = StructureSim::new(struct_, &init_position);
+        let mut struct_sim = StructureSim::new(struct_);
+        struct_sim.set_initial_conditions(&init_position);
         let mut sim = Simulation::new(struct_sim);
 
         sim.run();
