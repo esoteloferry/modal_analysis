@@ -11,7 +11,7 @@ pub struct Structure {
 }
 
 impl Structure {
-    pub fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
+    pub fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Self, String> {
         let modes = match modal::eigen(&mass, &stiffness) {
             Ok(val) => val,
             Err(err) => return Err(format!("Error getting modes : {}", err)),
@@ -37,16 +37,20 @@ pub struct StructureSim {
 }
 
 impl StructureSim {
-    pub fn new(structure: Structure, init_position: &DVector<f64>) -> StructureSim {
-        let init_modal = modal::get_free_vibration(
-            &structure.modes.eigenvectors_normalized,
-            &structure.mass,
-            init_position,
-        );
+    pub fn new(structure: Structure) -> Self {
+        let dim = structure.mass.nrows();
         StructureSim {
             structure: structure,
-            init_cond_modal: init_modal,
+            init_cond_modal: DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]),
         }
+    }
+    pub fn set_initial_conditions(&mut self, init_position: &DVector<f64>) {
+        let init_modal = modal::get_free_vibration(
+            &self.structure.modes.eigenvectors_normalized,
+            &self.structure.mass,
+            init_position,
+        );
+        self.init_cond_modal = init_modal
     }
     fn step(&self, time: f64) -> DVector<f64> {
         modal::solve_with_form_solution(
@@ -91,7 +95,7 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    pub fn new(structure: StructureSim) -> Simulation {
+    pub fn new(structure: StructureSim) -> Self {
         // let struc_sim = StructureSim::new(structure, &init_position);
         let time_vect = get_time_array(TOTAL_TIME, TIME_STEP);
         let mut position: Vec<DVector<f64>> = vec![];
@@ -108,8 +112,8 @@ impl Simulation {
     }
 
     pub fn run(&mut self) {
-        for time in self.time.iter() {
-            let new_position = self.structure.step(time.clone());
+        for time in self.time.iter().to_owned() {
+            let new_position = self.structure.step(*time);
             self.position.push(new_position);
         }
     }
@@ -144,12 +148,14 @@ mod tests {
         assert!(struct_.is_ok());
         let struct_ = struct_.unwrap();
         let init_position = DVector::from_vec(vec![1.0, 0.0]);
-        let struct_sim = StructureSim::new(struct_, &init_position);
+        let mut struct_sim = StructureSim::new(struct_);
+        struct_sim.set_initial_conditions(&init_position);
         let mut sim = Simulation::new(struct_sim);
 
         sim.run();
 
         println!("time : {:?}", sim.time);
+        //TODO: find pos at 5 s , get position and compare with setup._2d.response_t5s
         // for pos in sim.position {
         //     println!("sim position : {}", pos);
         // }
