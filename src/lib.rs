@@ -91,11 +91,10 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    pub fn new(structure: Structure, init_position: DVector<f64>) -> Simulation {
-        let struc_sim = StructureSim::new(structure, &init_position);
+    pub fn new(structure: StructureSim) -> Simulation {
+        // let struc_sim = StructureSim::new(structure, &init_position);
         let time_vect = get_time_array(TOTAL_TIME, TIME_STEP);
         let mut position: Vec<DVector<f64>> = vec![];
-        position.push(init_position);
 
         Simulation {
             time: time_vect,
@@ -104,7 +103,7 @@ impl Simulation {
                 total_time: TOTAL_TIME,
             },
             position: position,
-            structure: struc_sim,
+            structure,
         }
     }
 
@@ -145,7 +144,8 @@ mod tests {
         assert!(struct_.is_ok());
         let struct_ = struct_.unwrap();
         let init_position = DVector::from_vec(vec![1.0, 0.0]);
-        let mut sim = Simulation::new(struct_, init_position);
+        let struct_sim = StructureSim::new(struct_, &init_position);
+        let mut sim = Simulation::new(struct_sim);
 
         sim.run();
 
