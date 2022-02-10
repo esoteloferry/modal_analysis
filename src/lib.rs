@@ -11,7 +11,7 @@ pub struct Structure {
 }
 
 impl Structure {
-    fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
+    pub fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
         let modes = match modal::eigen(&mass, &stiffness) {
             Ok(val) => val,
             Err(err) => return Err(format!("Error getting modes : {}", err)),
@@ -37,7 +37,7 @@ pub struct StructureSim {
 }
 
 impl StructureSim {
-    fn new(structure: Structure, init_position: &DVector<f64>) -> StructureSim {
+    pub fn new(structure: Structure, init_position: &DVector<f64>) -> StructureSim {
         let init_modal = modal::get_free_vibration(
             &structure.modes.eigenvectors_normalized,
             &structure.mass,
