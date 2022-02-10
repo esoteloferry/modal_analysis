@@ -1,6 +1,6 @@
 extern crate nalgebra as na;
 
-mod modal;
+pub mod modal;
 use na::{DMatrix, DVector};
 
 #[derive(Debug)]
