@@ -57,6 +57,10 @@ impl StructureSim {
         )
     }
 }
+
+// fn get_num_timesteps(total_time: f64, timestep: f64) -> usize {
+//     total_time % timestep
+// }
 // fn set_initial_conditions(
 //     structure: &Structure,
 //     init_position: &DVector<f64>,
@@ -73,38 +77,63 @@ impl StructureSim {
 #[derive(Debug)]
 pub struct ConfigSim {
     pub timestep: f64,
+    pub total_time: f64,
 }
+const TIME_STEP: f64 = 0.1;
+const TOTAL_TIME: f64 = 150.0;
 
 #[derive(Debug)]
 pub struct Simulation {
-    pub time: f64,
+    pub time: Vec<f64>,
     pub config: ConfigSim,
     pub position: Vec<DVector<f64>>, //this will be solution variables
     pub structure: StructureSim,
 }
 
 impl Simulation {
-    fn new(structure: Structure, init_position: DVector<f64>) -> Simulation {
+    pub fn new(structure: Structure, init_position: DVector<f64>) -> Simulation {
         let struc_sim = StructureSim::new(structure, &init_position);
-        let mut position: Vec<DVector<f64>> = Vec::with_capacity(100);
+        let time_vect = get_time_array(TOTAL_TIME, TIME_STEP);
+        let mut position: Vec<DVector<f64>> = vec![];
         position.push(init_position);
 
         Simulation {
-            time: 0.0,
-            config: ConfigSim { timestep: 0.05 },
+            time: time_vect,
+            config: ConfigSim {
+                timestep: TIME_STEP,
+                total_time: TOTAL_TIME,
+            },
             position: position,
             structure: struc_sim,
         }
     }
 
-    fn step(&mut self) {
-        self.time += self.config.timestep;
-        self.position.push(self.structure.step(self.time));
+    pub fn run(&mut self) {
+        for time in self.time.iter() {
+            let new_position = self.structure.step(time.clone());
+            self.position.push(new_position);
+        }
     }
+}
+fn get_time_array(total_time: f64, time_step: f64) -> Vec<f64> {
+    let num_steps = (total_time / time_step).round() as usize;
+    let mut time = vec![0.0; num_steps + 1];
+    let mut current_time = 0.0;
+    for i in 0..(num_steps + 1) {
+        time[i] = if current_time > total_time {
+            total_time
+        } else {
+            current_time
+        };
+        current_time += time_step;
+    }
+    return time;
 }
 
 #[cfg(test)]
-mod struct_sim_tests {
+mod tests {
+    use crate::get_time_array;
+
     use super::*;
 
     use modal::tests::Setup;
@@ -118,9 +147,26 @@ mod struct_sim_tests {
         let init_position = DVector::from_vec(vec![1.0, 0.0]);
         let mut sim = Simulation::new(struct_, init_position);
 
-        sim.step();
-        sim.step();
+        sim.run();
 
-        println!("sim position : {:?}", sim.position);
+        println!("time : {:?}", sim.time);
+        // for pos in sim.position {
+        //     println!("sim position : {}", pos);
+        // }
+    }
+
+    #[test]
+    fn test_get_time_array() {
+        let time_vec1 = get_time_array(10.0, 1.0);
+        assert!(time_vec1.len().eq(&11));
+        assert!(time_vec1[time_vec1.len() - 1].eq(&10.0));
+
+        let time_vec2 = get_time_array(10.0, 20.0);
+        assert!(time_vec2.len().eq(&2));
+        assert!(time_vec2[time_vec2.len() - 1].eq(&10.0));
+
+        let time_vec3 = get_time_array(10.0, 3.3);
+        assert!(time_vec3.len().eq(&4));
+        assert!(time_vec3[time_vec3.len() - 1].lt(&10.0));
     }
 }
