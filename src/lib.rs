@@ -1,409 +1,126 @@
 extern crate nalgebra as na;
-use std::ops::{AddAssign, DivAssign, Mul};
 
-use na::{ComplexField, DMatrix, DVector};
+mod modal;
+use na::{DMatrix, DVector};
 
 #[derive(Debug)]
-pub struct Mode {
-    pub frequency: Vec<f64>,                   //rad/s
-    pub eigenvalues: DMatrix<f64>,             // Also known as Spectral Matrix
-    pub eigenvectors_normalized: DMatrix<f64>, //Also known as Modal Matrix
-    pub eigenvectors: DMatrix<f64>,
+pub struct Structure {
+    pub mass: DMatrix<f64>,
+    pub stiffness: DMatrix<f64>,
+    pub modes: modal::Mode,
 }
-//In general, it is assumed that the diagonal entries of the spectral
-//matrix and the columns in the modal matrix are ordered according to the
-//increasing magnitudes of the eigenvalues BUT in this case is not returned in that way
 
-// Properties:
-
-// Orthonality property
-// For an eigenvalue (lambda_i) and eigenvector (x_i), the eigenvalue problem equation [K]*x = lambda*[M]*x can be
-// rewriten as [K]*x_a = lambda_a*[M]*x_a , another pair can be [K]*x_b = lambda_b*[M]*x_b
-// The property makes:
-//  x_b_trans * [M] * x_a = 0
-//  x_b_trans * [K] * x_a = 0
-pub fn check_orthogonality_property(
-    mass: DMatrix<f64>,
-    stiff: DMatrix<f64>,
-    eigenvectors: DMatrix<f64>,
-) -> bool {
-    let dim = eigenvectors.ncols();
-    let vec_dim_num: Vec<usize> = (0..dim).collect();
-
-    for (i, col) in eigenvectors.column_iter().enumerate() {
-        let mut other_cols = vec_dim_num.clone();
-        other_cols.retain(|&x| !x.eq(&i));
-        for other_col_idx in other_cols {
-            let mul_vecb_mass_veca = col
-                .transpose()
-                .mul(&mass)
-                .mul(eigenvectors.column(other_col_idx));
-            // println!("Check {}", mul_vecb_mass_veca);
-            if mul_vecb_mass_veca.sum() != 0.0 {
-                return false;
-            }
-        }
-    }
-    true
-}
-// Expansion theorem or Principle of modal superposition
-
-// Lib functions
-
-pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Result<Mode, String> {
-    //Checks
-    if !mass_matrix.is_square() {
-        return Err(String::from("Mass matrix is not square"));
-    }
-    if !stiffness_matrix.is_square() {
-        return Err(String::from("Stiffness matrix is not square"));
-    }
-    let shape_mass = mass_matrix.shape();
-    let shape_stiff = stiffness_matrix.shape();
-    if shape_mass != shape_stiff {
-        return Err(String::from(format!(
-            "Matrix and stiffness matrix have different dimensions. Mass={}, Stiffness={}",
-            shape_mass.0, shape_stiff.0
-        )));
-    }
-
-    let dim = shape_mass.0;
-
-    let inv_m_matrix = match mass_matrix.clone().try_inverse() {
-        Some(i) => i,
-        None => return Err(String::from("Matrix could not be inversed")),
-    };
-    let a_matrix = inv_m_matrix * stiffness_matrix;
-
-    let eigen = match a_matrix.eigenvalues() {
-        Some(i) => i,
-        None => return Err(String::from("Error getting eigenvalues")),
-    };
-    // println!("A_matrix :{}", a_matrix);
-
-    let mut eigen_vect: DMatrix<f64> = DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]);
-
-    // println!("HEllloo {}", eigen);
-    for (i, lambda) in eigen.iter().enumerate() {
-        let eigen_identity_matrix: DMatrix<f64> = DMatrix::identity(dim, dim).mul(*lambda);
-        let a_mat_for_eigen_vec = a_matrix.clone() - &eigen_identity_matrix;
-        let mut b_vec = vec![0.0; dim];
-        // Determinant is zero, which implies that there is only one independent equation for the two unknowns.
-        // Hence, we can use either equation to solve for the ratios of the unknowns, therefore we
-        // set b_vec[i]=1.0
-        b_vec[i] = 1.0;
-        // Other way can be to set always the first value to 1.0
-        // b_vec[0] = 1.0;
-        // println!("HEllloo {}", lambda);
-        let b = DMatrix::from_vec(dim, 1, b_vec);
-        let decomp = a_mat_for_eigen_vec.lu();
-        let mut x = match decomp.solve(&b) {
-            Some(i) => i,
-            None => return Err(String::from("Linear resolution failed")),
+impl Structure {
+    fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
+        let modes = match modal::eigen(&mass, &stiffness) {
+            Ok(val) => val,
+            Err(err) => return Err(format!("Error getting modes : {}", err)),
         };
-        x.div_assign(x[i]);
-        // This way corresponds to setting first value to 1.0 in b_vec
-        // x.div_assign(x[0]);
-        match add_sub_matrix(&mut eigen_vect, (0, i), &x) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        };
+
+        Ok(Structure {
+            mass,
+            stiffness,
+            modes,
+        })
     }
 
-    let omega = eigen.clone().map(|e| e.sqrt()).as_slice().to_vec();
+    //TODO:_
+    fn get_total_mass() {}
 
-    // Get modal mass and modal stiffness matrix
-    let modal_mass = eigen_vect.transpose().mul(mass_matrix).mul(&eigen_vect);
-
-    let mut eigen_vect_norm = eigen_vect.clone();
-    for (i, mut col) in eigen_vect_norm.column_iter_mut().enumerate() {
-        col.div_assign(modal_mass[(i, i)].powf(0.5));
-    }
-
-    //
-    // let diag_c = eigen.clone().div_assign(2.0);
-    // println!("Diag_c : {}", diag_c);
-    // let mut c_natural = DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]);
-    // for (i, _) in c_natural.diagonal().iter_mut().enumerate() {
-    //     c_natural[(i, i)] = 2.0 * 0.0025 * omega[(i)];
-    // }
-    // println!("{}", c_natural);
-    //
-    // let inv_eigen_vect_trans = match eigen_vect_trans.clone().try_inverse() {
-    //     Some(i) => i,
-    //     None => panic!("Matrix could not be inversed"),
-    // };
-    // let inv_eigen_vect = match eigen_vect.clone().try_inverse() {
-    //     Some(i) => i,
-    //     None => panic!("Matrix could not be inversed"),
-    // };
-    //
-    // let c_damping = inv_eigen_vect_trans.mul(c_natural).mul(inv_eigen_vect);
-    //
-    // println!("C damping : {}", c_damping);
-    // let mut omega_vec: Vec<f64> = Vec::with_capacity(dim);
-    // for om in omega.iter() {
-    //     omega_vec.push(om.to_owned())
-    // }
-    // let mut eigen_vect_norm_vec: Vec<Vec<f64>> = Vec::new();
-    // for col in eigen_vect_norm.column_iter() {
-    //     eigen_vect_norm_vec.push(col.as_slice().to_owned())
-    // }
-    // let mut modes: Vec<Mode> = Vec::with_capacity(dim);
-    // TODO: what effect has a change in column position of eigenvector matrix? to x variables?
-    // for (omega, shape) in omega_vec.iter().zip(eigen_vect_norm_vec) {
-    //     modes.push(Mode {
-    //         frequency: *omega,
-    //         mode: shape,
-    //     });
-    // }
-    // modes.sort_by(|a, b| a.frequency.partial_cmp(&b.frequency).unwrap());
-    let mode = Mode {
-        frequency: omega,
-        eigenvalues: DMatrix::from_diagonal(&eigen),
-        eigenvectors_normalized: eigen_vect_norm,
-        eigenvectors: eigen_vect,
-    };
-    return Ok(mode);
+    fn get_frequencies() {}
 }
 
-//Functions to get vibration motion
-//
-// x = x_free  +  x_forced
-//
-//
-pub fn get_free_vibration(
-    eigenvec_norm: &DMatrix<f64>,
-    omegas: &DVector<f64>,
-    mass_mat: &DMatrix<f64>,
-    init_cond: &DVector<f64>,
-) -> Result<impl Fn(f64) -> DVector<f64>, String> {
-    // q init = EigenVec_trans * Mass_matrix * InitCond_Pos
-    let q_0 = eigenvec_norm.transpose().mul(mass_mat).mul(init_cond);
-    // So converting from modal space to physics space
-    //  [x] = [[eigen_vec_norm]] * [q]
-    //  Where [q] = [[q_0]] * [[cos(omega_i * t)]], each of matrix in right are diagonal
-    //  By association:
-    //  [x] = ( [[eigen_vec_norm]] * [[q_0]] ) * [[cos(omega_i * t)]]
-    //          \--------------------------/
-    //               this will not change
-    //  [x] = [[constant]] * [[cos(omega_i * t)]]
-    let init_mod_space_mat = DMatrix::from_diagonal(&q_0);
-    let eigen_vec_mul_q_0 = eigenvec_norm.mul(init_mod_space_mat);
-    Ok(solve_with_form_solution(
-        eigen_vec_mul_q_0,
-        omegas.clone(),
-        cos_sol_form,
-    ))
+#[derive(Debug)]
+pub struct StructureSim {
+    pub structure: Structure,
+    pub init_cond_modal: DMatrix<f64>,
 }
 
-// Solution form : x= A cos (omega * t)
-fn cos_sol_form(time: f64, omega: f64) -> f64 {
-    (omega * time).cos()
-}
-
-fn solve_with_form_solution<F: Fn(f64, f64) -> f64>(
-    const_mat: DMatrix<f64>,
-    omegas: DVector<f64>,
-    form_solution: F,
-) -> impl Fn(f64) -> DVector<f64> {
-    move |time| {
-        let mut sum: DVector<f64> = DVector::from_vec(vec![0.0; const_mat.nrows()]);
-        for (i, col) in const_mat.column_iter().enumerate() {
-            let cos_at_time = form_solution(time, omegas[i]);
-            sum.add_assign(col.mul(cos_at_time));
-        }
-        sum
-    }
-}
-
-fn add_sub_matrix(
-    mat: &mut DMatrix<f64>,
-    (row, col): (usize, usize),
-    submat: &DMatrix<f64>,
-) -> Result<(), String> {
-    //check if col , row + size(submat) does not overpass size(mat)
-    if (submat.nrows() + row) > mat.nrows() || (submat.ncols() + col) > mat.ncols() {
-        return Err("Size submatrix and position are incompatible with matrix".to_string());
-    }
-
-    for (i, col_submat) in submat.column_iter().enumerate() {
-        let pos_col_mat = i + col;
-        for (j, value) in col_submat.iter().enumerate() {
-            let pos_row_mat = j + row;
-            mat[(pos_row_mat, pos_col_mat)] += *value;
+impl StructureSim {
+    fn new(structure: Structure, init_position: &DVector<f64>) -> StructureSim {
+        let init_modal = modal::get_free_vibration(
+            &structure.modes.eigenvectors_normalized,
+            &structure.mass,
+            init_position,
+        );
+        StructureSim {
+            structure: structure,
+            init_cond_modal: init_modal,
         }
     }
-    Ok(())
+    fn step(&self, time: f64) -> DVector<f64> {
+        modal::solve_with_form_solution(
+            time,
+            &self.init_cond_modal,
+            &self.structure.modes.frequency,
+            modal::cos_sol_form,
+        )
+    }
+}
+// fn set_initial_conditions(
+//     structure: &Structure,
+//     init_position: &DVector<f64>,
+// ) -> impl Fn(f64) -> DVector<f64> {
+//     let free_vib = modal::get_free_vibration(
+//         &structure.modes.eigenvectors_normalized,
+//         &structure.modes.frequency,
+//         &structure.mass,
+//         &init_position,
+//     )
+//     .unwrap();
+//     free_vib
+// }
+#[derive(Debug)]
+pub struct ConfigSim {
+    pub timestep: f64,
+}
+
+#[derive(Debug)]
+pub struct Simulation {
+    pub time: f64,
+    pub config: ConfigSim,
+    pub position: Vec<DVector<f64>>, //this will be solution variables
+    pub structure: StructureSim,
+}
+
+impl Simulation {
+    fn new(structure: Structure, init_position: DVector<f64>) -> Simulation {
+        let struc_sim = StructureSim::new(structure, &init_position);
+        let mut position: Vec<DVector<f64>> = Vec::with_capacity(100);
+        position.push(init_position);
+
+        Simulation {
+            time: 0.0,
+            config: ConfigSim { timestep: 0.05 },
+            position: position,
+            structure: struc_sim,
+        }
+    }
+
+    fn step(&mut self) {
+        self.time += self.config.timestep;
+        self.position.push(self.structure.step(self.time));
+    }
 }
 
 #[cfg(test)]
-mod tests {
-
-    use std::ops::AddAssign;
-
-    use na::{DVector, Matrix2x4, Vector2};
-
-    //This allows me to test private functions
-    struct Modal {
-        Mass_Matrix: DMatrix<f64>,
-        Stiff_Matrix: DMatrix<f64>,
-        Frequencies: DVector<f64>,
-        EigenValues: DMatrix<f64>,
-        EigenVectors_Normalized: DMatrix<f64>,
-    }
-
-    struct Setup {
-        _2d: Modal,
-    }
-
-    impl Setup {
-        fn new() -> Self {
-            let dim = 2;
-            let mass_mat_vec: Vec<f64> = vec![1.0, 0.0, 0.0, 2.0]; //kg
-            let stiff_mat_vec: Vec<f64> = vec![2.0, -1.0, -1.0, 2.0]; //N/m
-
-            let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
-            let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
-            //Solution
-            let (w1_2D, w2_2D) = (1.53819, 0.79623); //rad/s
-            let sol_freq_vec_2D = DVector::from_vec(vec![w1_2D, w2_2D]);
-            let sol_eigenval_2D =
-                DMatrix::from_vec(dim, dim, vec![w1_2D * w1_2D, 0.0, 0.0, w2_2D * w2_2D]);
-            let sol_eigenvec_norm_2D =
-                DMatrix::from_vec(dim, dim, vec![0.88807, -0.32506, 0.4597, 0.62796]);
-            Self {
-                _2d: Modal {
-                    Mass_Matrix: m_matrix,
-                    Stiff_Matrix: k_matrix,
-                    Frequencies: sol_freq_vec_2D,
-                    EigenValues: sol_eigenval_2D,
-                    EigenVectors_Normalized: sol_eigenvec_norm_2D,
-                },
-            }
-        }
-    }
+mod struct_sim_tests {
     use super::*;
 
+    use modal::tests::Setup;
+
     #[test]
-    fn eigen_analysis() {
+    fn simulation_step() {
         let setup = Setup::new();
-        let m_matrix = setup._2d.Mass_Matrix;
-        let k_matrix = setup._2d.Stiff_Matrix;
-        let modes = eigen(&m_matrix, &k_matrix);
-        assert!(modes.is_ok());
-        let modes = modes.unwrap();
-        //Print
-        println!("Frequencies : {:?}", modes.frequency);
-        println!("Eigenvalues : {}", modes.eigenvalues);
-        println!("Eigenvectors : {}", modes.eigenvectors);
-        println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
+        let struct_ = Structure::new(setup._2d.mass_matrix, setup._2d.stiff_matrix);
+        assert!(struct_.is_ok());
+        let struct_ = struct_.unwrap();
+        let init_position = DVector::from_vec(vec![1.0, 0.0]);
+        let mut sim = Simulation::new(struct_, init_position);
 
-        // println!("{:?}", modes.eigenvectors.clone().mul(mass_mat_vec));
-        // assert_eq!(2 + 2, 4);
-        let freq_vec_na = DVector::from_vec(modes.frequency);
-        let eps = 0.0001;
-        assert!(freq_vec_na.relative_eq(&setup._2d.Frequencies, eps, eps));
-        assert!(modes
-            .eigenvalues
-            .relative_eq(&setup._2d.EigenValues, eps, eps));
-        assert!(modes.eigenvectors_normalized.relative_eq(
-            &setup._2d.EigenVectors_Normalized,
-            eps,
-            eps
-        ));
+        sim.step();
+        sim.step();
 
-        println!(
-            "Xt * M * X : {}",
-            modes
-                .eigenvectors_normalized
-                .transpose()
-                .mul(&m_matrix)
-                .mul(&modes.eigenvectors_normalized)
-        );
-        let generalized_mass = modes
-            .eigenvectors
-            .transpose()
-            .mul(&m_matrix)
-            .mul(&modes.eigenvectors);
-        println!("Xt * M * X : {}", generalized_mass);
-        let check_orthog_prop =
-            check_orthogonality_property(m_matrix, k_matrix, modes.eigenvectors_normalized);
-        assert!(check_orthog_prop);
+        println!("sim position : {:?}", sim.position);
     }
-    #[test]
-    fn test_case_runs_ok() {
-        let mass_mat_vec: Vec<f64> = vec![2.0, 0.0, 0.0, 1.0];
-        let stiff_mat_vec: Vec<f64> = vec![4000.0, -3000.0, -3000.0, 5000.0];
-
-        let dim: usize = 2;
-        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
-        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
-
-        let modes = eigen(&m_matrix, &k_matrix);
-        assert!(modes.is_ok());
-        // let modes = modes.unwrap();
-        //Print
-        // println!("Frequencies : {:?}", modes.frequency);
-        // println!("Eigenvalues : {}", modes.eigenvalues);
-        // println!("Eigenvectors : {}", modes.eigenvectors);
-        // println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
-    }
-    #[test]
-    fn rigid_body() {
-        let mass_mat_vec: Vec<f64> = vec![150.0, 0.0, 0.0, 100.0];
-        let stiff_mat_vec: Vec<f64> = vec![15000.0, -15000.0, -15000.0, 15000.0];
-
-        let dim: usize = 2;
-        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
-        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
-
-        let modes = eigen(&m_matrix, &k_matrix);
-        assert!(modes.is_err());
-        // TODO: check eigenvectors and eigenvalues of elastic modes
-        println!("{}", modes.expect_err(""))
-    }
-
-    #[test]
-    fn test_get_free_vibration() {
-        let setup = Setup::new();
-        let ini_cond = DVector::from_vec(vec![1.0, 0.0]);
-        let fnvib = get_free_vibration(
-            &setup._2d.EigenVectors_Normalized,
-            &setup._2d.Frequencies,
-            &setup._2d.Mass_Matrix,
-            &ini_cond,
-        );
-        assert!(fnvib.is_ok());
-        let fnvib = fnvib.unwrap();
-        println!("{}", fnvib(0.0));
-        println!("{}", fnvib(2.0));
-        println!("{}", fnvib(4.0));
-    }
-    // #[test]
-    // fn vec_mul_mat() {
-    //     let vec: DVector<f64> = DVector::from_vec(vec![1.0, 1.0]);
-    //     let matrix: DMatrix<f64> = DMatrix::from_vec(2, 2, vec![1.0, 0.0, 0.0, 2.0]);
-    //     //     println!("{}", vec.transpose());
-    //     //     println!("{}", matrix);
-    //     //     println!("{}", vec.transpose().mul(matrix));
-    // }
-    // #[test]
-    // fn vec_mul_mat_compile() {
-    //     let vec: Vector2<f64> = Vector2::from_vec(vec![1.0, 1.0]);
-    //     let matrix: Matrix2x4<f64> =
-    //         Matrix2x4::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-    //     // println!("{}", vec.mul(matrix))
-    //     // println!("{}", vec.transpose());
-    //     // println!("{}", matrix);
-    //     // println!("{}", vec.transpose().mul(matrix));
-    // }
-    //
-    // #[test]
-    // fn vec_add() {
-    //     let mut vec_empty: Vector2<f64> = Vector2::from_vec(vec![0.0; 2]);
-    //     let vec_to_add: Vector2<f64> = Vector2::from_vec(vec![1.0, 1.0]);
-    //     vec_empty.add_assign(vec_to_add);
-    //     println!("{}", vec_empty);
-    // }
 }
