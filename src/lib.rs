@@ -11,7 +11,7 @@ pub struct Structure {
 }
 
 impl Structure {
-    fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
+    pub fn new(mass: DMatrix<f64>, stiffness: DMatrix<f64>) -> Result<Structure, String> {
         let modes = match modal::eigen(&mass, &stiffness) {
             Ok(val) => val,
             Err(err) => return Err(format!("Error getting modes : {}", err)),
