@@ -1,7 +1,7 @@
 extern crate nalgebra as na;
 use std::ops::{AddAssign, DivAssign, Mul};
 
-use na::{ComplexField, DMatrix, DVector};
+use na::{DMatrix, DVector};
 
 #[derive(Debug)]
 pub struct Mode {
@@ -24,7 +24,7 @@ pub struct Mode {
 //  x_b_trans * [K] * x_a = 0
 pub fn check_orthogonality_property(
     mass: DMatrix<f64>,
-    stiff: DMatrix<f64>,
+    _stiff: DMatrix<f64>,
     eigenvectors: DMatrix<f64>,
 ) -> bool {
     let dim = eigenvectors.ncols();
@@ -49,7 +49,9 @@ pub fn check_orthogonality_property(
 // Expansion theorem or Principle of modal superposition
 
 // Lib functions
-
+fn print_type_of<T>(_: T) {
+    println!("{}", std::any::type_name::<T>())
+}
 pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Result<Mode, String> {
     //Checks
     if !mass_matrix.is_square() {
@@ -79,15 +81,15 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
         Some(i) => i,
         None => return Err(String::from("Error getting eigenvalues")),
     };
-    // println!("A_matrix :{}", a_matrix);
+    println!("A_matrix :{}", a_matrix);
 
     let mut eigen_vect: DMatrix<f64> = DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]);
 
     // println!("HEllloo {}", eigen);
     for (i, lambda) in eigen.iter().enumerate() {
         let eigen_identity_matrix: DMatrix<f64> = DMatrix::identity(dim, dim).mul(*lambda);
-        let a_mat_for_eigen_vec = a_matrix.clone() - &eigen_identity_matrix;
-        let mut b_vec = vec![0.0; dim];
+        let a_mat_for_eigen_vec: DMatrix<f64> = a_matrix.clone() - &eigen_identity_matrix;
+        let mut b_vec: Vec<f64> = vec![0.0; dim];
         // Determinant is zero, which implies that there is only one independent equation for the two unknowns.
         // Hence, we can use either equation to solve for the ratios of the unknowns, therefore we
         // set b_vec[i]=1.0
@@ -95,7 +97,9 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
         // Other way can be to set always the first value to 1.0
         // b_vec[0] = 1.0;
         // println!("HEllloo {}", lambda);
-        let b = DMatrix::from_vec(dim, 1, b_vec);
+        let b: DMatrix<f64> = DMatrix::from_vec(dim, 1, b_vec);
+        // let b: DVector<f64> = DVector::from_vec(b_vec);
+        println!("helllooa aftehet {}", a_mat_for_eigen_vec);
         let decomp = a_mat_for_eigen_vec.lu();
         let mut x = match decomp.solve(&b) {
             Some(i) => i,
@@ -272,19 +276,29 @@ fn add_sub_matrix(
 #[cfg(test)]
 pub mod tests {
 
+    //This allows me to test private functions
     use super::*;
-    use std::ops::AddAssign;
+    use std::ops::Div;
 
     use na::{DVector, Matrix2x4, Vector2};
 
-    const eps: f64 = 0.0001;
-    //This allows me to test private functions
+    pub const EPS: f64 = 0.0001;
     pub struct Modal {
         pub mass_matrix: DMatrix<f64>,
         pub stiff_matrix: DMatrix<f64>,
         frequencies: DVector<f64>,
-        eigenValues: DMatrix<f64>,
-        eigenVectors_normalized: DMatrix<f64>,
+        eigenvalues: DMatrix<f64>,
+        eigenvectors_normalized: DMatrix<f64>,
+        pub free_transient: Transient,
+    }
+
+    pub struct Transient {
+        pub init_cond: DVector<f64>,
+        pub response: Vec<Response>,
+    }
+    pub struct Response {
+        pub time: f64,
+        pub values: DVector<f64>,
     }
 
     pub struct Setup {
@@ -300,19 +314,32 @@ pub mod tests {
             let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
             let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
             //Solution
-            let (w1_2D, w2_2D) = (1.53819, 0.79623); //rad/s
-            let sol_freq_vec_2D = DVector::from_vec(vec![w1_2D, w2_2D]);
-            let sol_eigenval_2D =
-                DMatrix::from_vec(dim, dim, vec![w1_2D * w1_2D, 0.0, 0.0, w2_2D * w2_2D]);
-            let sol_eigenvec_norm_2D =
+            let (w1_2d, w2_2d) = (1.53819, 0.79623); //rad/s
+            let sol_freq_vec_2d = DVector::from_vec(vec![w1_2d, w2_2d]);
+            let sol_eigenval_2d =
+                DMatrix::from_vec(dim, dim, vec![w1_2d * w1_2d, 0.0, 0.0, w2_2d * w2_2d]);
+            let sol_eigenvec_norm_2d =
                 DMatrix::from_vec(dim, dim, vec![0.88807, -0.32506, 0.4597, 0.62796]);
+            let response_t5s = Response {
+                time: 5.0,
+                values: DVector::from_vec(vec![-0.0131029, -0.2396485]).div(100.0),
+            };
+            let response_t10s = Response {
+                time: 10.0,
+                values: DVector::from_vec(vec![-0.7700099, 0.24229929]).div(100.0),
+            };
+            let hand_calc_sol = Transient {
+                init_cond: DVector::from_vec(vec![1.0, 0.0]).div(100.0),
+                response: vec![response_t5s, response_t10s],
+            }; // X1 and X2 [m] (real)
             Self {
                 _2d: Modal {
                     mass_matrix: m_matrix,
                     stiff_matrix: k_matrix,
-                    frequencies: sol_freq_vec_2D,
-                    eigenValues: sol_eigenval_2D,
-                    eigenVectors_normalized: sol_eigenvec_norm_2D,
+                    frequencies: sol_freq_vec_2d,
+                    eigenvalues: sol_eigenval_2d,
+                    eigenvectors_normalized: sol_eigenvec_norm_2d,
+                    free_transient: hand_calc_sol,
                 },
             }
         }
@@ -335,14 +362,14 @@ pub mod tests {
         // println!("{:?}", modes.eigenvectors.clone().mul(mass_mat_vec));
         // assert_eq!(2 + 2, 4);
         let freq_vec_na = modes.frequency;
-        assert!(freq_vec_na.relative_eq(&setup._2d.frequencies, eps, eps));
+        assert!(freq_vec_na.relative_eq(&setup._2d.frequencies, EPS, EPS));
         assert!(modes
             .eigenvalues
-            .relative_eq(&setup._2d.eigenValues, eps, eps));
+            .relative_eq(&setup._2d.eigenvalues, EPS, EPS));
         assert!(modes.eigenvectors_normalized.relative_eq(
-            &setup._2d.eigenVectors_normalized,
-            eps,
-            eps
+            &setup._2d.eigenvectors_normalized,
+            EPS,
+            EPS
         ));
 
         println!(
@@ -399,25 +426,32 @@ pub mod tests {
     #[test]
     fn test_get_free_vibration() {
         let setup = Setup::new();
-        let ini_cond = DVector::from_vec(vec![1.0, 0.0]);
         let init_cond_modal = get_free_vibration(
-            &setup._2d.eigenVectors_normalized,
+            &setup._2d.eigenvectors_normalized,
             &setup._2d.mass_matrix,
-            &ini_cond,
+            &setup._2d.free_transient.init_cond,
         );
-        let sol_t5 =
-            solve_with_form_solution(5.0, &init_cond_modal, &setup._2d.frequencies, cos_sol_form);
-        let sol_t10 =
-            solve_with_form_solution(10.0, &init_cond_modal, &setup._2d.frequencies, cos_sol_form);
-        // assert!(fnvib.is_ok());
-        // let fnvib = fnvib.unwrap();
-        let sol_t5_hand_calc = DVector::from_vec(vec![-0.0131029, -0.2396485]);
-        let sol_t10_hand_calc = DVector::from_vec(vec![-0.7700099, 0.24229929]);
 
-        println!("t5: {}", sol_t5);
-        println!("t10: {}", sol_t10);
-        assert!(sol_t5.relative_eq(&sol_t5_hand_calc, eps, eps));
-        assert!(sol_t10.relative_eq(&sol_t10_hand_calc, eps, eps));
+        for trans in &setup._2d.free_transient.response {
+            let sol = solve_with_form_solution(
+                trans.time,
+                &init_cond_modal,
+                &setup._2d.frequencies,
+                cos_sol_form,
+            );
+            assert!(trans.values.relative_eq(&sol, EPS, EPS));
+        }
+        // let sol_t5 =
+        //     solve_with_form_solution(5.0, &init_cond_modal, &setup._2d.frequencies, cos_sol_form);
+        // let sol_t10 =
+        //     solve_with_form_solution(10.0, &init_cond_modal, &setup._2d.frequencies, cos_sol_form);
+        // // assert!(fnvib.is_ok());
+        // // let fnvib = fnvib.unwrap();
+        //
+        // println!("t5: {}", sol_t5);
+        // println!("t10: {}", sol_t10);
+        // assert!(sol_t5.relative_eq(&setup._2d.free_transient.response_t5s, eps, eps));
+        // assert!(sol_t10.relative_eq(&setup._2d.free_transient.response_t10s, eps, eps));
 
         // println!("{}", fnvib(0.0));
         // println!("{}", fnvib(2.0));

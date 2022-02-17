@@ -5,6 +5,7 @@ use na::{DMatrix, DVector};
 
 #[derive(Debug)]
 pub struct Structure {
+    pub gen_coord: Vec<SensorName>,
     pub mass: DMatrix<f64>,
     pub stiffness: DMatrix<f64>,
     pub modes: modal::Mode,
@@ -16,8 +17,19 @@ impl Structure {
             Ok(val) => val,
             Err(err) => return Err(format!("Error getting modes : {}", err)),
         };
+        let sensor_names = vec![
+            SensorName {
+                name: "X1".to_string(),
+                units: "m".to_string(),
+            },
+            SensorName {
+                name: "X2".to_string(),
+                units: "m".to_string(),
+            },
+        ];
 
         Ok(Structure {
+            gen_coord: sensor_names,
             mass,
             stiffness,
             modes,
@@ -33,15 +45,36 @@ impl Structure {
 #[derive(Debug)]
 pub struct StructureSim {
     pub structure: Structure,
+    pub sensors: Vec<Sensor>,
     pub init_cond_modal: DMatrix<f64>,
+    time: f64,
+    config: ConfigSim,
 }
 
 impl StructureSim {
-    pub fn new(structure: Structure) -> Self {
+    pub fn new(structure: Structure, config: ConfigSim) -> Self {
         let dim = structure.mass.nrows();
+        let mut sensors = vec![];
+        for coord in &structure.gen_coord {
+            sensors.push(Sensor {
+                info: coord.clone(),
+                timeseries: vec![],
+            })
+        }
+        // let sensors = structure
+        //     .gen_coord
+        //     .iter()
+        //     .map(|n| Sensor {
+        //         info: n.clone(),
+        //         timeseries: vec![],
+        //     })
+        //     .collect();
         StructureSim {
-            structure: structure,
+            structure,
+            sensors,
             init_cond_modal: DMatrix::from_vec(dim, dim, vec![0.0; dim * dim]),
+            time: 0.0,
+            config,
         }
     }
     pub fn set_initial_conditions(&mut self, init_position: &DVector<f64>) {
@@ -50,15 +83,28 @@ impl StructureSim {
             &self.structure.mass,
             init_position,
         );
-        self.init_cond_modal = init_modal
+        self.init_cond_modal = init_modal;
+        //Reset timeseseries
+        for sensor in self.sensors.iter_mut() {
+            sensor.timeseries = vec![]
+        }
+        // for (sensor, ini) in self.sensors.iter_mut().zip(init_position) {
+        //     sensor.timeseries = vec![*ini]
+        // }
     }
-    fn step(&self, time: f64) -> DVector<f64> {
-        modal::solve_with_form_solution(
-            time,
+    //Step will start from time =0.0 s
+    fn step(&mut self) {
+        let latest_pos_all = modal::solve_with_form_solution(
+            self.time,
             &self.init_cond_modal,
             &self.structure.modes.frequency,
             modal::cos_sol_form,
-        )
+        );
+        for (i, latest_pos) in latest_pos_all.iter().enumerate() {
+            self.sensors[i].timeseries.push(*latest_pos)
+        }
+
+        self.time += self.config.timestep;
     }
 }
 
@@ -78,7 +124,7 @@ impl StructureSim {
 //     .unwrap();
 //     free_vib
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConfigSim {
     pub timestep: f64,
     pub total_time: f64,
@@ -86,35 +132,40 @@ pub struct ConfigSim {
 const TIME_STEP: f64 = 0.1;
 const TOTAL_TIME: f64 = 150.0;
 
+#[derive(Debug, Clone)]
+pub struct SensorName {
+    pub name: String,
+    pub units: String,
+}
+
+#[derive(Debug)]
+pub struct Sensor {
+    pub info: SensorName,
+    pub timeseries: Vec<f64>,
+}
+
 #[derive(Debug)]
 pub struct Simulation {
     pub time: Vec<f64>,
     pub config: ConfigSim,
-    pub position: Vec<DVector<f64>>, //this will be solution variables
     pub structure: StructureSim,
 }
 
 impl Simulation {
-    pub fn new(structure: StructureSim) -> Self {
+    pub fn new(structure: StructureSim, config: ConfigSim) -> Self {
         // let struc_sim = StructureSim::new(structure, &init_position);
-        let time_vect = get_time_array(TOTAL_TIME, TIME_STEP);
-        let mut position: Vec<DVector<f64>> = vec![];
+        let time_vect = get_time_array(config.total_time, config.timestep);
 
         Simulation {
             time: time_vect,
-            config: ConfigSim {
-                timestep: TIME_STEP,
-                total_time: TOTAL_TIME,
-            },
-            position: position,
+            config,
             structure,
         }
     }
 
     pub fn run(&mut self) {
-        for time in self.time.iter().to_owned() {
-            let new_position = self.structure.step(*time);
-            self.position.push(new_position);
+        for _ in 0..(self.time.len()) {
+            self.structure.step();
         }
     }
 }
@@ -133,8 +184,24 @@ fn get_time_array(total_time: f64, time_step: f64) -> Vec<f64> {
     return time;
 }
 
+fn find_time_pos_in_vec(time_vec: &Vec<f64>, time_to_find: f64) -> i32 {
+    let (mut t_found, mut pos_time) = (false, 0);
+    for (i, t) in time_vec.iter().enumerate() {
+        if (t - time_to_find).abs() < 0.0001 {
+            t_found = true;
+            pos_time = i;
+        }
+    }
+
+    if !t_found {
+        return -1;
+    }
+    return pos_time as i32;
+}
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use crate::get_time_array;
 
     use super::*;
@@ -147,18 +214,29 @@ mod tests {
         let struct_ = Structure::new(setup._2d.mass_matrix, setup._2d.stiff_matrix);
         assert!(struct_.is_ok());
         let struct_ = struct_.unwrap();
-        let init_position = DVector::from_vec(vec![1.0, 0.0]);
-        let mut struct_sim = StructureSim::new(struct_);
-        struct_sim.set_initial_conditions(&init_position);
-        let mut sim = Simulation::new(struct_sim);
+        let config = ConfigSim {
+            timestep: 1.0,
+            total_time: 10.0,
+        };
+        let mut struct_sim = StructureSim::new(struct_, config.clone());
+        struct_sim.set_initial_conditions(&setup._2d.free_transient.init_cond);
+        let mut sim = Simulation::new(struct_sim, config.clone());
 
         sim.run();
 
-        println!("time : {:?}", sim.time);
-        //TODO: find pos at 5 s , get position and compare with setup._2d.response_t5s
-        // for pos in sim.position {
-        //     println!("sim position : {}", pos);
-        // }
+        // println!("time : {:?}", sim.time.len());
+
+        // println!("position {:?}", sim.structure.sensors[0]);
+        for trans in &setup._2d.free_transient.response {
+            let pos_time = find_time_pos_in_vec(&sim.time, trans.time);
+            if pos_time == -1 {
+                panic!("Time from test not found in sim.time");
+            }
+            for (i, x_sens) in sim.structure.sensors.iter().enumerate() {
+                let pos_from_sensor = x_sens.timeseries[pos_time as usize];
+                assert!((pos_from_sensor - trans.values[i]).abs() < modal::tests::EPS)
+            }
+        }
     }
 
     #[test]
