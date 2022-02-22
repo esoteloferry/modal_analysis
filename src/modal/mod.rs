@@ -39,7 +39,8 @@ pub fn check_orthogonality_property(
                 .mul(&mass)
                 .mul(eigenvectors.column(other_col_idx));
             // println!("Check {}", mul_vecb_mass_veca);
-            if mul_vecb_mass_veca.sum() != 0.0 {
+            if mul_vecb_mass_veca.sum().abs() > 1.0e-8 {
+                println!("Found not zero {}", mul_vecb_mass_veca);
                 return false;
             }
         }
@@ -88,30 +89,35 @@ pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Res
     // println!("HEllloo {}", eigen);
     for (i, lambda) in eigen.iter().enumerate() {
         let eigen_identity_matrix: DMatrix<f64> = DMatrix::identity(dim, dim).mul(*lambda);
-        let a_mat_for_eigen_vec: DMatrix<f64> = a_matrix.clone() - &eigen_identity_matrix;
-        let mut b_vec: Vec<f64> = vec![0.0; dim];
+        let mut a_mat_for_eigen_vec: DMatrix<f64> = a_matrix.clone() - &eigen_identity_matrix;
         // Determinant is zero, which implies that there is only one independent equation for the two unknowns.
-        // Hence, we can use either equation to solve for the ratios of the unknowns, therefore we
-        // set b_vec[i]=1.0
-        b_vec[i] = 1.0;
-        // Other way can be to set always the first value to 1.0
-        // b_vec[0] = 1.0;
-        // println!("HEllloo {}", lambda);
-        let b: DMatrix<f64> = DMatrix::from_vec(dim, 1, b_vec);
-        // let b: DVector<f64> = DVector::from_vec(b_vec);
-        println!("helllooa aftehet {}", a_mat_for_eigen_vec);
+        // Hence, we can use either equation to solve for the ratios of the unknowns
+        // A * X = 0
+        // Setting X1 = 1
+        //    - A can be reduced (deleting first column and first row)
+        //    - Vector appear on right hand, which is X1 multplied by first column. And we can
+        //    remove first item (X1) because A is reduced anyways
+        // A_new * X_[2..] = b  , which has one dimension less than before but now its determinant
+        // is not zero
+
+        // Get right hand
+        let mut b = a_mat_for_eigen_vec.clone();
+        b = b.remove_row(0);
+        b = b.mul(-1.0);
+        let b_right = b.column(0);
+
+        // Get new A
+        a_mat_for_eigen_vec = a_mat_for_eigen_vec.remove_row(0);
+        a_mat_for_eigen_vec = a_mat_for_eigen_vec.remove_column(0);
+
         let decomp = a_mat_for_eigen_vec.lu();
-        let mut x = match decomp.solve(&b) {
+        let x = match decomp.solve(&b_right) {
             Some(i) => i,
             None => return Err(String::from("Linear resolution failed")),
         };
-        x.div_assign(x[i]);
-        // This way corresponds to setting first value to 1.0 in b_vec
-        // x.div_assign(x[0]);
-        match add_sub_matrix(&mut eigen_vect, (0, i), &x) {
-            Ok(_) => (),
-            Err(e) => return Err(e),
-        };
+        let mut eigen_vect_found = vec![1.0];
+        eigen_vect_found.extend(x.iter());
+        eigen_vect.set_column(i, &DVector::from_vec(eigen_vect_found));
     }
 
     let omega = eigen.clone().map(|e| e.sqrt());
@@ -303,6 +309,7 @@ pub mod tests {
 
     pub struct Setup {
         pub _2d: Modal,
+        pub _2d_with_rigid_mode: Modal,
     }
 
     impl Setup {
@@ -332,15 +339,41 @@ pub mod tests {
                 init_cond: DVector::from_vec(vec![1.0, 0.0]).div(100.0),
                 response: vec![response_t5s, response_t10s],
             }; // X1 and X2 [m] (real)
-            Self {
-                _2d: Modal {
-                    mass_matrix: m_matrix,
-                    stiff_matrix: k_matrix,
-                    frequencies: sol_freq_vec_2d,
-                    eigenvalues: sol_eigenval_2d,
-                    eigenvectors_normalized: sol_eigenvec_norm_2d,
-                    free_transient: hand_calc_sol,
+            let _2d: Modal = Modal {
+                mass_matrix: m_matrix,
+                stiff_matrix: k_matrix,
+                frequencies: sol_freq_vec_2d,
+                eigenvalues: sol_eigenval_2d,
+                eigenvectors_normalized: sol_eigenvec_norm_2d,
+                free_transient: hand_calc_sol,
+            };
+
+            // _2D_with rigid mode
+            // Source:
+            // https://rotorlab.tamu.edu/me617/HD%207%20Modal%20Analysis%20Undamped%20MDOF.pdf ,
+            // page 41
+            let m_matrix = DMatrix::from_diagonal(&DVector::from_vec(vec![100.0, 50.0]));
+            let k_matrix = DMatrix::from_vec(dim, dim, vec![1.0e6, -1.0e6, -1.0e6, 1.0e6]);
+            //Solution
+            let sol_freq_vec_2d = DVector::from_vec(vec![173.21, 0.0]); //rad/s
+            let sol_eigenval_2d = DMatrix::from_vec(dim, dim, vec![1.0, -2.0, 1.0, 1.0]);
+            let sol_eigenvec_norm_2d =
+                DMatrix::from_vec(dim, dim, vec![0.057735, -0.11547, 0.0816497, 0.0816497]);
+            //TODO: add transient
+            let _2d_with_rigid_mode = Modal {
+                mass_matrix: m_matrix,
+                stiff_matrix: k_matrix,
+                frequencies: sol_freq_vec_2d,
+                eigenvalues: sol_eigenval_2d,
+                eigenvectors_normalized: sol_eigenvec_norm_2d,
+                free_transient: Transient {
+                    init_cond: DVector::from_vec(vec![]),
+                    response: vec![],
                 },
+            };
+            Self {
+                _2d,
+                _2d_with_rigid_mode,
             }
         }
     }
@@ -354,13 +387,11 @@ pub mod tests {
         assert!(modes.is_ok());
         let modes = modes.unwrap();
         //Print
-        println!("Frequencies : {:?}", modes.frequency);
+        println!("Frequencies : {}", modes.frequency);
         println!("Eigenvalues : {}", modes.eigenvalues);
         println!("Eigenvectors : {}", modes.eigenvectors);
         println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
 
-        // println!("{:?}", modes.eigenvectors.clone().mul(mass_mat_vec));
-        // assert_eq!(2 + 2, 4);
         let freq_vec_na = modes.frequency;
         assert!(freq_vec_na.relative_eq(&setup._2d.frequencies, EPS, EPS));
         assert!(modes
@@ -409,18 +440,43 @@ pub mod tests {
         // println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
     }
     #[test]
-    fn rigid_body() {
-        let mass_mat_vec: Vec<f64> = vec![150.0, 0.0, 0.0, 100.0];
-        let stiff_mat_vec: Vec<f64> = vec![15000.0, -15000.0, -15000.0, 15000.0];
-
-        let dim: usize = 2;
-        let m_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, mass_mat_vec);
-        let k_matrix: DMatrix<f64> = DMatrix::from_vec(dim, dim, stiff_mat_vec);
+    fn rigid_body_eigen_analysis() {
+        let setup = Setup::new();
+        let m_matrix = setup._2d.mass_matrix;
+        let k_matrix = setup._2d.stiff_matrix;
 
         let modes = eigen(&m_matrix, &k_matrix);
-        assert!(modes.is_err());
+        assert!(modes.is_ok());
+        let modes = modes.unwrap();
+        //Print
+        println!("Frequencies : {}", modes.frequency);
+        println!("Eigenvalues : {}", modes.eigenvalues);
+        println!("Eigenvectors : {}", modes.eigenvectors);
+        println!("Eigenvectors normalized: {}", modes.eigenvectors_normalized);
+
+        let freq_vec_na = modes.frequency;
+        assert!(freq_vec_na.relative_eq(&setup._2d.frequencies, EPS, EPS));
+        assert!(modes
+            .eigenvalues
+            .relative_eq(&setup._2d.eigenvalues, EPS, EPS));
+        assert!(modes.eigenvectors_normalized.relative_eq(
+            &setup._2d.eigenvectors_normalized,
+            EPS,
+            EPS
+        ));
+        println!(
+            "Xt * M * X : {}",
+            modes
+                .eigenvectors_normalized
+                .transpose()
+                .mul(&m_matrix)
+                .mul(&modes.eigenvectors_normalized)
+        );
+
+        let check_orthog_prop =
+            check_orthogonality_property(m_matrix, k_matrix, modes.eigenvectors_normalized);
+        assert!(check_orthog_prop);
         // TODO: check eigenvectors and eigenvalues of elastic modes
-        println!("{}", modes.expect_err(""))
     }
 
     #[test]
