@@ -17,16 +17,13 @@ impl Structure {
             Ok(val) => val,
             Err(err) => return Err(format!("Error getting modes : {}", err)),
         };
-        let sensor_names = vec![
-            SensorName {
-                name: "X1".to_string(),
+        let mut sensor_names: Vec<SensorName> = vec![];
+        for (i, _) in modes.frequency.iter().enumerate() {
+            sensor_names.push(SensorName {
+                name: format!("X{}", i.to_string()),
                 units: "m".to_string(),
-            },
-            SensorName {
-                name: "X2".to_string(),
-                units: "m".to_string(),
-            },
-        ];
+            })
+        }
 
         Ok(Structure {
             gen_coord: sensor_names,
@@ -108,22 +105,6 @@ impl StructureSim {
     }
 }
 
-// fn get_num_timesteps(total_time: f64, timestep: f64) -> usize {
-//     total_time % timestep
-// }
-// fn set_initial_conditions(
-//     structure: &Structure,
-//     init_position: &DVector<f64>,
-// ) -> impl Fn(f64) -> DVector<f64> {
-//     let free_vib = modal::get_free_vibration(
-//         &structure.modes.eigenvectors_normalized,
-//         &structure.modes.frequency,
-//         &structure.mass,
-//         &init_position,
-//     )
-//     .unwrap();
-//     free_vib
-// }
 #[derive(Debug, Clone)]
 pub struct ConfigSim {
     pub timestep: f64,
