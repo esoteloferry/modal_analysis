@@ -1,7 +1,11 @@
+// mod modal;
+
 extern crate nalgebra as na;
 use std::ops::{AddAssign, DivAssign, Mul};
 
 use na::{DMatrix, DVector};
+
+mod eigen;
 
 #[derive(Debug)]
 pub struct Mode {
@@ -53,6 +57,7 @@ pub fn check_orthogonality_property(
 fn print_type_of<T>(_: T) {
     println!("{}", std::any::type_name::<T>())
 }
+
 pub fn eigen(mass_matrix: &DMatrix<f64>, stiffness_matrix: &DMatrix<f64>) -> Result<Mode, String> {
     //Checks
     if !mass_matrix.is_square() {

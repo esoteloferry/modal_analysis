@@ -1,3 +1,4 @@
+#![feature(total_cmp)]
 extern crate nalgebra as na;
 
 pub mod modal;
